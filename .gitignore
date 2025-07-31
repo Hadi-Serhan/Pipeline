@@ -54,6 +54,7 @@ __pycache__/
 *.jpeg
 *.svg
 *.pdf
+*.docx
 
 # Logs and temporary files
 *.log
