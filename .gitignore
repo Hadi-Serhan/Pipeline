@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# CSV and result files
+*.csv
+*.tsv
+*.xlsx
+*.xls
+
+
+# Image and output files
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.docx
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# IDE/editor specific files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
