@@ -17,4 +17,8 @@ scipy
 plotly
 scikit-learn
 networkx
+<<<<<<< HEAD
 >>>>>>> 224eb84 (Pipeline)
+=======
+statsmodels
+>>>>>>> d4d73ae (...)
