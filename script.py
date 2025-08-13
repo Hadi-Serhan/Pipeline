@@ -552,6 +552,9 @@ from sklearn.metrics import silhouette_score
 from scipy.stats import ks_2samp
 import itertools
 import networkx as nx
+from sklearn.ensemble import IsolationForest
+import matplotlib.patches as mpatches
+from scipy.spatial.distance import cdist
 
 
 # Loads the dataset from a csv file
@@ -757,6 +760,19 @@ def run_kmeans_pca_analysis(pca_data, max_k=10):
     # Return both lists to help decide
     return inertias, silhouettes
 
+def detect_anomalies_isolation_forest(df, features, contamination=0.01):
+
+    clf = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
+    X = df[features].dropna()
+    clf.fit(X)
+    
+    anomaly_labels = clf.predict(X)
+    anomaly_scores = clf.decision_function(X)
+    
+    df.loc[X.index, 'Anomaly'] = (anomaly_labels == -1).astype(int)
+    df.loc[X.index, 'Anomaly_Score'] = -anomaly_scores  # Higher = more anomalous
+
+    return df
 
 
 def plot_3d_clusters_sampled(pca_df, labels, sample_size=5000):
@@ -985,6 +1001,135 @@ def plot_info_flow_graph(G, max_nodes=100):
     plt.show()
 
 
+def summarize_anomalies_by_cluster(df, cluster_col='Cluster', anomaly_col='Anomaly'):
+    """
+    Returns a summary DataFrame with anomaly counts and percentages for each cluster.
+    """
+    anomalies = df[df[anomaly_col] == 1][cluster_col].value_counts().sort_index()
+    normals = df[df[anomaly_col] == 0][cluster_col].value_counts().sort_index()
+
+    summary_df = pd.DataFrame({
+        'Anomalies': anomalies,
+        'Normal': normals
+    }).fillna(0)
+
+    summary_df['Total'] = summary_df['Anomalies'] + summary_df['Normal']
+    summary_df['Anomaly Rate (%)'] = 100 * summary_df['Anomalies'] / summary_df['Total']
+    return summary_df
+
+def plot_anomaly_rates(summary_df):
+    """
+    Plots anomaly rates per cluster from a summary DataFrame.
+    """
+    summary_df = summary_df.copy()
+
+    # Only reset index if 'Cluster' is not already a column
+    if 'Cluster' not in summary_df.columns:
+        summary_df['Cluster'] = summary_df.index
+
+    plt.figure(figsize=(8, 5))
+    sns.barplot(data=summary_df, x='Cluster', y='Anomaly Rate (%)', palette='coolwarm')
+    plt.title("Anomaly Rate per Cluster")
+    plt.ylabel("Anomaly Percentage")
+    plt.xlabel("Cluster")
+    plt.ylim(0, 100)
+    plt.tight_layout()
+    plt.show()
+
+
+def compare_anomaly_distributions(df, features, cluster_col='Cluster', anomaly_col='Anomaly'):
+    """
+    Plots KDE plots for each feature and cluster, comparing anomaly vs normal.
+    """
+    unique_clusters = sorted(df[cluster_col].dropna().unique())
+
+    for cluster_id in unique_clusters:
+        for feature in features:
+            plt.figure(figsize=(8, 4))
+            subset = df[df[cluster_col] == cluster_id]
+
+            sns.kdeplot(subset[subset[anomaly_col] == 0][feature], label='Normal', fill=True)
+            sns.kdeplot(subset[subset[anomaly_col] == 1][feature], label='Anomaly', fill=True)
+
+            plt.title(f"{feature} Distribution in Cluster {cluster_id}")
+            plt.xlabel(feature)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+
+
+
+
+def geometric_median(X, eps=1e-5):
+    y = np.mean(X, axis=0)
+    while True:
+        D = np.linalg.norm(X - y, axis=1)
+        nonzeros = D != 0
+        if not np.any(nonzeros):
+            return y
+        Dinv = 1 / D[nonzeros]
+        W = Dinv / Dinv.sum()
+        T = (X[nonzeros] * W[:, None]).sum(axis=0)
+        if np.linalg.norm(y - T) < eps:
+            return T
+        y = T
+
+def geometric_median_outliers(df, features, threshold_percentile=95):
+    X = df[features].dropna().values
+    gm = geometric_median(X)
+    distances = np.linalg.norm(X - gm, axis=1)
+    
+    threshold = np.percentile(distances, threshold_percentile)
+    
+    outlier_mask = distances > threshold
+    df.loc[df[features].dropna().index, 'GeoMed_Outlier'] = outlier_mask.astype(int)
+    df.loc[df[features].dropna().index, 'GeoMed_Distance'] = distances
+    return df
+
+def plot_geomed_outliers_pca(pca_df, df, outlier_col='GeoMed_Outlier', title_suffix=""):
+
+    # Merge PCA with outlier flags
+    plot_df = pca_df[['PC1', 'PC2']].copy()
+    plot_df[outlier_col] = df[outlier_col]
+
+    # Plot
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(
+        data=plot_df,
+        x='PC1',
+        y='PC2',
+        hue=plot_df[outlier_col].map({0: "Normal", 1: "Outlier"}),
+        palette={"Normal": "blue", "Outlier": "red"},
+        alpha=0.5,
+        s=10
+    )
+    
+    plt.title(f"Geometric Median Outliers in PCA Space {title_suffix}")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    
+    legend_handles = [
+        mpatches.Patch(color='blue', label='Normal'),
+        mpatches.Patch(color='red', label='Outlier')
+    ]
+    plt.legend(handles=legend_handles, title="Status")
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_geomed_distance_histogram(df, distance_col='GeoMed_Distance', threshold_percentile=95):
+    threshold = np.percentile(df[distance_col].dropna(), threshold_percentile)
+    
+    plt.figure(figsize=(8, 5))
+    sns.histplot(df[distance_col], bins=100, kde=True)
+    plt.axvline(threshold, color='red', linestyle='--', label=f'{threshold_percentile}th percentile')
+    plt.title("Distribution of Distances from Geometric Median")
+    plt.xlabel("Distance")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 
 def main():
     
@@ -1005,8 +1150,8 @@ def main():
     df = clean_data(df)
     
     # ==== Analysis and Visualization ====
-    plot_correlation_heatmap(df, selected_columns)
-    plot_density_per_column(df)
+    # plot_correlation_heatmap(df, selected_columns)
+    # plot_density_per_column(df)
     describe_label_distribution(df, label_col='Label')
     describe_variables(df, variable_scales)
     
@@ -1021,11 +1166,23 @@ def main():
     output_path = "DarknetWorking_with_outliers.csv"
     df.to_csv(output_path, index=False)
     analyze_outlier_overlap(df, [f"{col}_Outlier" for col in selected_columns])
+  
+    # ==== Geometric Median Outliers ====
+    df = geometric_median_outliers(df, selected_columns, threshold_percentile=95)
+    print(f"\n--- Geometric Median Outliers at 95th Percentile ---")
+    num_outliers = df['GeoMed_Outlier'].sum()
+    print(f"Total outliers flagged: {num_outliers} / {len(df)}")
+
+    plot_geomed_distance_histogram(df, distance_col='GeoMed_Distance', threshold_percentile=95)
+
     
     # ==== PCA analysis====
     variance_df, loadings_df, pc_scores_df = pca_spss_style(df, selected_columns, n_components=3)
     pc_scores_df.index = df.index  # Ensure alignment with df
-
+    
+    # Plot PCA variance explained
+    plot_geomed_outliers_pca(pc_scores_df, df, title_suffix="(95th Percentile Threshold)")
+    
     # ==== Clustering Analysis ====
     plot_elbow_method(pc_scores_df, max_k=10)
     labels, kmeans_model = run_kmeans_clustering(pc_scores_df, n_clusters=3)
@@ -1033,7 +1190,41 @@ def main():
     df.to_csv("DarknetWorking_with_outliers.csv", index=False)
     plot_3d_clusters_sampled(pc_scores_df, df['Cluster'], sample_size=5000)
     
+    # ========Detect anomalies using Isolation Forest ===========
+    df = detect_anomalies_isolation_forest(df, selected_columns, contamination=0.02)
+    number_of_anomalies = df['Anomaly'].sum()
+    print(f"Detected {number_of_anomalies} anomalies out of {len(df)} rows.")
+    # 2D PCA Scatterplot with anomaly overlay
+    sns.scatterplot(
+        x=pc_scores_df['PC1'],
+        y=pc_scores_df['PC2'],
+        hue=df['Anomaly'].map({0: "Normal", 1: "Anomaly"}),
+        palette={"Normal": "blue", "Anomaly": "red"},
+        alpha=0.5,
+        s=10
+    )
+    # Create custom legend handles
+    legend_handles = [
+        mpatches.Patch(color='blue', label='Normal'),
+        mpatches.Patch(color='red', label='Anomaly')
+    ]
+    # Set title and labels
+    plt.title(f"Isolation Forest Anomalies in PCA Space, {number_of_anomalies} anomalies detected")
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    # Apply custom legend
+    plt.legend(handles=legend_handles, title='Anomaly')
+    plt.tight_layout()
+    plt.show()
     
+    # Summarize anomalies by cluster and plot
+    summary_df = summarize_anomalies_by_cluster(df)
+    plot_anomaly_rates(summary_df)
+    key_features = ['Idle Mean', 'Flow Duration']
+    compare_anomaly_distributions(df, key_features)
+
+    
+    # ==== Cluster Interpretation ====
     summary_df = interpret_clusters(df, selected_columns)
     summary_df.to_csv("cluster_summary.csv", index=True)
     plot_normalized_cluster_mean_heatmap(df, selected_columns, cluster_col='Cluster')
