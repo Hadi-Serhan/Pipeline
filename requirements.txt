@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 pandas
 seaborn
 matplotlib
@@ -7,3 +8,13 @@ plotly
 scikit-learn
 networkx
 statsmodels
+=======
+pandas
+seaborn
+matplotlib
+numpy
+scipy
+plotly
+scikit-learn
+networkx
+>>>>>>> 224eb84 (Pipeline)
